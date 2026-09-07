@@ -11,8 +11,6 @@ from audio_recognizer import AudioRecognizer
 
 API_KEY = "YOUR_GEMINI_API_KEY_HERE"
 MIC_ID = 1
-
-#検出器モデル
 DETECTOR_BACKEND = 'ssd' 
 
 COLORS = {
@@ -30,6 +28,12 @@ EMOTION_JP = {
     "Anger": "怒り",
     "Fear": "恐れ",
     "Neutral": "普通"
+}
+
+MODE_NAMES = {
+    "presentation": "プレゼン（聴衆）",
+    "interview": "面接（採用担当）",
+    "casual": "雑談（友人）"
 }
 
 if sys.platform == 'win32':
@@ -50,7 +54,7 @@ def draw_japanese_text(img, text, position, font_size=20, color=(255, 255, 255))
 def main():
     print("ダッシュボードを起動中...")
     
-    text_analyzer = TextAnalyzer(api_key=API_KEY)
+    text_analyzer = TextAnalyzer(api_key=API_KEY, mode="presentation")
     audio_recognizer = AudioRecognizer(mic_id=MIC_ID)
     audio_recognizer.start_speech_to_text(text_analyzer.analyze_async)
     
@@ -59,11 +63,7 @@ def main():
         print("カメラを開けませんでした。")
         return
 
-    #表情スコアの履歴
-    history_len = 5
-    score_history = deque(maxlen=history_len)
-    
-    #最後に検出された顔の位置
+    score_history = deque(maxlen=5)
     last_region = None
 
     while True:
@@ -73,17 +73,18 @@ def main():
         
         h, w, _ = frame.shape
         panel_w = 400
-        canvas = cv2.copyMakeBorder(frame, 0, 0, 0, panel_w, cv2.BORDER_CONSTANT, value=(20, 20, 20))
+        bottom_h = 70
+        
+        canvas = cv2.copyMakeBorder(frame, 0, bottom_h, 0, panel_w, cv2.BORDER_CONSTANT, value=(20, 20, 20))
         
         current_face_scores = None
 
-        #表情解析
         try:
             results = DeepFace.analyze(
                 frame, 
                 actions=['emotion'], 
                 detector_backend=DETECTOR_BACKEND, 
-                enforce_detection=True,
+                enforce_detection=True, 
                 silent=True
             )
             if results:
@@ -97,7 +98,6 @@ def main():
         except Exception:
             pass
 
-        #履歴バッファ追加、移動平均の算出
         if current_face_scores:
             score_history.append(current_face_scores)
         
@@ -106,7 +106,6 @@ def main():
             for key in face_scores:
                 face_scores[key] = round(sum(s[key] for s in score_history) / len(score_history), 3)
 
-        #顔枠の描画
         if last_region and len(score_history) > 0:
             reg = last_region
             cv2.rectangle(canvas, (reg['x'], reg['y']), (reg['x']+reg['w'], reg['y']+reg['h']), COLORS["Total"], 2)
@@ -133,59 +132,82 @@ def main():
         if total_scores["Neutral"] > max_s:
             dominant_emo = "Neutral"
 
-        #UI
+        # UI描画
         px = w + 20
-        py = 30
-        
-        display_txt = current_text if len(current_text) < 25 else current_text[:23] + "..."
-        canvas = draw_japanese_text(canvas, f"認識された言葉: {display_txt}", (15, h - 35), font_size=18, color=(255, 255, 255))
-        
-        if text_analyzer.is_processing:
-            canvas = draw_japanese_text(canvas, "解析中...", (w - 100, h - 35), font_size=18, color=COLORS["Joy"])
+        py = 20
 
-        #総合
-        canvas = draw_japanese_text(canvas, "【総合感情】", (px, py), font_size=20, color=(255, 255, 255))
-        canvas = draw_japanese_text(canvas, EMOTION_JP[dominant_emo], (px, py + 35), font_size=32, color=COLORS[dominant_emo])
+        #評価対象
+        mode_label = MODE_NAMES.get(text_analyzer.current_mode, "未設定")
+        cv2.rectangle(canvas, (px - 5, py - 5), (px + 375, py + 55), (40, 40, 40), -1)
+        cv2.rectangle(canvas, (px - 5, py - 5), (px + 375, py + 55), (0, 255, 255), 1)
+        canvas = draw_japanese_text(canvas, f"評価対象: {mode_label}", (px + 5, py), font_size=18, color=(0, 255, 255))
+        canvas = draw_japanese_text(canvas, "[1]プレゼン [2]面接 [3]雑談", (px + 5, py + 28), font_size=13, color=(180, 180, 180))
+
+        #総合判定
+        g_py = py + 70
+        canvas = draw_japanese_text(canvas, "【総合感情】", (px, g_py), font_size=18, color=(255, 255, 255))
+        canvas = draw_japanese_text(canvas, EMOTION_JP[dominant_emo], (px, g_py + 30), font_size=30, color=COLORS[dominant_emo])
         
         #声の大きさ
-        v_py = py + 95
-        canvas = draw_japanese_text(canvas, "声の大きさ", (px, v_py - 5), font_size=16, color=(200, 200, 200))
-        cv2.rectangle(canvas, (px + 100, v_py - 5), (px + 100 + 200, v_py + 15), (50, 50, 50), -1)
+        v_py = g_py + 85
+        canvas = draw_japanese_text(canvas, "声の熱量", (px, v_py - 5), font_size=15, color=(200, 200, 200))
+        cv2.rectangle(canvas, (px + 90, v_py - 5), (px + 90 + 200, v_py + 15), (50, 50, 50), -1)
         v_w = int(200 * vol_score)
         if v_w > 0:
-            cv2.rectangle(canvas, (px + 100, v_py - 5), (px + 100 + v_w, v_py + 15), COLORS["Joy"], -1)
-        canvas = draw_japanese_text(canvas, f"{vol_score:.2f}", (px + 310, v_py - 5), font_size=16, color=(255, 255, 255))
+            cv2.rectangle(canvas, (px + 90, v_py - 5), (px + 90 + v_w, v_py + 15), COLORS["Joy"], -1)
+        canvas = draw_japanese_text(canvas, f"{vol_score:.2f}", (px + 300, v_py - 5), font_size=15, color=(255, 255, 255))
 
-        # 感情詳細
-        g_py = v_py + 45
-        canvas = draw_japanese_text(canvas, "【感情詳細】(上:表情 / 中:総合 / 下:言葉)", (px, g_py), font_size=15, color=(200, 200, 200))
+        # 詳細
+        m_py = v_py + 40
+        canvas = draw_japanese_text(canvas, "【感情詳細】(上:表情 / 中:総合 / 下:言葉)", (px, m_py), font_size=14, color=(200, 200, 200))
         
         for i, emo in enumerate(["Joy", "Sadness", "Anger", "Fear", "Neutral"]):
-            y = g_py + 35 + i * 50
+            y = m_py + 30 + i * 45
             color = COLORS[emo]
             
-            canvas = draw_japanese_text(canvas, EMOTION_JP[emo], (px, y - 5), font_size=16, color=(220, 220, 220))
+            canvas = draw_japanese_text(canvas, EMOTION_JP[emo], (px, y - 5), font_size=15, color=(220, 220, 220))
             
-            gx = px + 80
-            gw = 210
-            cv2.rectangle(canvas, (gx, y - 5), (gx + gw, y + 20), (30, 30, 30), -1)
+            gx = px + 75
+            gw = 200
+            cv2.rectangle(canvas, (gx, y - 5), (gx + gw, y + 18), (30, 30, 30), -1)
             
             f_w = int(gw * face_scores[emo])
             if f_w > 0: cv2.rectangle(canvas, (gx, y - 3), (gx + f_w, y + 1), color, 1)
 
             t_w = int(gw * total_scores[emo])
-            if t_w > 0: cv2.rectangle(canvas, (gx, y + 3), (gx + t_w, y + 12), color, -1)
+            if t_w > 0: cv2.rectangle(canvas, (gx, y + 3), (gx + t_w, y + 10), color, -1)
 
             x_w = int(gw * txt_only_scores[emo])
-            if x_w > 0: cv2.rectangle(canvas, (gx, y + 14), (gx + x_w, y + 18), (0, 255, 255), -1)
+            if x_w > 0: cv2.rectangle(canvas, (gx, y + 12), (gx + x_w, y + 16), (0, 255, 255), -1)
 
             score_str = f"{total_scores[emo]:.2f}({txt_only_scores[emo]:.2f})"
-            canvas = draw_japanese_text(canvas, score_str, (gx + gw + 5, y - 5), font_size=13, color=COLORS["Total"])
+            canvas = draw_japanese_text(canvas, score_str, (gx + gw + 5, y - 5), font_size=12, color=COLORS["Total"])
+
+        #下部UI
+        display_txt = current_text if len(current_text) < 25 else current_text[:23] + "..."
+        canvas = draw_japanese_text(canvas, f"認識された言葉: {display_txt}", (15, h + 10), font_size=16, color=(255, 255, 255))
+        
+        score_color = (0, 255, 0) if text_analyzer.score >= 70 else (0, 165, 255)
+        canvas = draw_japanese_text(canvas, f"発話スコア: {text_analyzer.score}点", (w + 20, h + 10), font_size=18, color=score_color)
+
+        advice_txt = text_analyzer.advice if len(text_analyzer.advice) < 40 else text_analyzer.advice[:38] + "..."
+        canvas = draw_japanese_text(canvas, f"AIアドバイス: {advice_txt}", (15, h + 38), font_size=16, color=(0, 255, 255))
+
+        if text_analyzer.is_processing:
+            canvas = draw_japanese_text(canvas, "AI分析中...", (w - 110, h + 10), font_size=16, color=COLORS["Joy"])
 
         cv2.imshow("リアルタイム感情分析ダッシュボード", canvas)
         
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        # キー入力
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
             break
+        elif key == ord('1'):
+            text_analyzer.set_mode("presentation")
+        elif key == ord('2'):
+            text_analyzer.set_mode("interview")
+        elif key == ord('3'):
+            text_analyzer.set_mode("casual")
 
     cap.release()
     audio_recognizer.stop()
