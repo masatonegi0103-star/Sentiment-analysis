@@ -1,27 +1,32 @@
 import json
 import threading
+import datetime
 import pandas as pd
 from janome.tokenizer import Tokenizer
 from google import genai
 
 class TextAnalyzer:
-    def __init__(self, api_key, csv_path='JIWC-A_2018.csv', mode="presentation"):
+    def __init__(self, api_key=None, model_name="gemini-2.0-flash", csv_path='JIWC-A_2018.csv', mode="presentation"):
         self.t = Tokenizer()
         self.api_key = api_key
-        try:
-            self.client = genai.Client(api_key=api_key)
-        except Exception:
-            self.client = None
+        self.model_name = model_name if model_name else "gemini-2.0-flash"
+        self.client = None
+
+        if self.api_key and self.api_key.strip():
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+            except Exception as e:
+                print(f"Gemini Client 初期化エラー: {e}")
             
         self.last_res = {"Joy": 0, "Sadness": 0, "Anger": 0, "Fear": 0, "Neutral": 1.0}
         self.text_only_res = {"Joy": 0, "Sadness": 0, "Anger": 0, "Fear": 0, "Neutral": 1.0}
         self.last_text = "（音声入力を待っています...）"
         
         self.score = 80
-        self.advice = "発話を待っています..."
+        self.advice = "AI解析スキップ中（ローカル解析のみ）" if not self.client else "発話を待っています..."
         self.is_processing = False
+        self.has_new_log = False
         
-        #モードの設定
         self.current_mode = mode
         self.prompts = {
             "presentation": "あなたはプレゼンのプロです。聞き手に対する論理性の高さ、説得力、わかりやすさを重視して評価してください。",
@@ -33,10 +38,8 @@ class TextAnalyzer:
         self.load_csv_dictionary(csv_path)
 
     def set_mode(self, mode):
-        """シチュエーションモードの変更"""
         if mode in self.prompts:
             self.current_mode = mode
-            print(f"評価モードを [{mode}] に変更しました。")
 
     def load_csv_dictionary(self, csv_path):
         try:
@@ -44,8 +47,8 @@ class TextAnalyzer:
             df['Fear'] = df['Anxiety']
             df['Anger_Total'] = df['Anger'] + df['Disgust']
             self.emotion_dict = df.set_index('Words')[['Joy', 'Sadness', 'Anger_Total', 'Fear']].rename(columns={'Anger_Total': 'Anger'}).to_dict('index')
-        except Exception as e:
-            print(f"辞書エラー: {e}")
+        except Exception:
+            pass
 
     def analyze_async(self, text):
         if self.is_processing or not text.strip():
@@ -56,7 +59,6 @@ class TextAnalyzer:
     def _analyze_logic(self, text):
         self.is_processing = True
         try:
-            #辞書スコア計算
             dict_scores = {"Joy": 0.0, "Sadness": 0.0, "Anger": 0.0, "Fear": 0.0, "Neutral": 0.0}
             tokens = self.t.tokenize(text)
             words = [token.surface for token in tokens]
@@ -82,11 +84,9 @@ class TextAnalyzer:
             self.text_only_res = dict_scores.copy()
             self.last_res = dict_scores.copy()
 
-            #GeminiAPI
-            if self.client and self.api_key and "YOUR_GEMINI_API_KEY" not in self.api_key:
+            if self.client:
                 try:
                     mode_instruction = self.prompts.get(self.current_mode, self.prompts["presentation"])
-                    
                     prompt = (
                         f"{mode_instruction}\n"
                         f"以下の発言を分析し、JSON形式で返してください。\n"
@@ -101,7 +101,7 @@ class TextAnalyzer:
                     )
                     
                     response = self.client.models.generate_content(
-                        model='gemini-2.0-flash',
+                        model=self.model_name,
                         contents=prompt,
                         config={'response_mime_type': 'application/json'}
                     )
@@ -117,8 +117,13 @@ class TextAnalyzer:
 
                 except Exception as e:
                     print(f"Gemini解析エラー: {e}")
+                    self.advice = "APIエラー（辞書解析のみ動作中）"
+            else:
+                self.advice = "AI解析スキップモードで動作中"
+
+            self.has_new_log = True
 
         except Exception as e:
-            print(f"解析処理エラー: {e}")
+            print(f"解析エラー: {e}")
         finally:
             self.is_processing = False
