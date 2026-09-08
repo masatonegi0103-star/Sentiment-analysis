@@ -5,27 +5,27 @@ import csv
 import os
 import datetime
 import numpy as np
+import tkinter as tk
+from tkinter import simpledialog, messagebox
 from collections import deque
 from PIL import Image, ImageDraw, ImageFont
 from deepface import DeepFace
-
 from text_analyzer import TextAnalyzer
 from audio_recognizer import AudioRecognizer
 
-API_KEY = "YOUR_GEMINI_API_KEY_HERE"
 MIC_ID = 1
 DETECTOR_BACKEND = 'ssd' 
 LOG_FILE = "log_history.csv"
 
 COLORS = {
-    "Joy": (0, 215, 255),
-    "Sadness": (255, 120, 160),
-    "Anger": (80, 80, 255),
-    "Fear": (200, 100, 200),
-    "Neutral": (180, 190, 200),
-    "Accent": (255, 190, 0),
-    "BgCard": (35, 38, 45),
-    "BgMain": (18, 20, 25)
+    "Joy": (0, 215, 255),       
+    "Sadness": (255, 120, 160), 
+    "Anger": (80, 80, 255),     
+    "Fear": (200, 100, 200),    
+    "Neutral": (180, 190, 200), 
+    "Accent": (255, 190, 0),    
+    "BgCard": (35, 38, 45),     
+    "BgMain": (18, 20, 25)      
 }
 
 EMOTION_JP = {
@@ -38,6 +38,54 @@ MODE_NAMES = {
 
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+def show_config_dialog():
+    config = {"api_key": None, "model_name": "gemini-2.0-flash"}
+
+    root = tk.Tk()
+    root.title("AI Dashboard Settings")
+    root.geometry("400x230")
+    root.resizable(False, False)
+
+    root.eval('tk::PlaceWindow . center')
+
+    tk.Label(root, text="AI Settings", font=("Helvetica", 14, "bold")).pack(pady=10)
+
+    #モデル名
+    frame_model = tk.Frame(root)
+    frame_model.pack(fill="x", px=20, py=5)
+    tk.Label(frame_model, text="Model Name:", width=12, anchor="w").pack(side="left")
+    entry_model = tk.Entry(frame_model)
+    entry_model.insert(0, "gemini-2.0-flash")
+    entry_model.pack(side="right", expand=True, fill="x")
+
+    #APIキー
+    frame_key = tk.Frame(root)
+    frame_key.pack(fill="x", px=20, py=5)
+    tk.Label(frame_key, text="API Key:", width=12, anchor="w").pack(side="left")
+    entry_key = tk.Entry(frame_key, show="*")
+    entry_key.pack(side="right", expand=True, fill="x")
+
+    def on_submit():
+        config["model_name"] = entry_model.get().strip()
+        config["api_key"] = entry_key.get().strip()
+        root.destroy()
+
+    def on_skip():
+        config["api_key"] = None
+        root.destroy()
+
+    btn_frame = tk.Frame(root)
+    btn_frame.pack(pady=15)
+
+    btn_ok = tk.Button(btn_frame, text="設定して起動", command=on_submit, width=12, bg="#4CAF50", fg="white")
+    btn_ok.pack(side="left", padx=10)
+
+    btn_skip = tk.Button(btn_frame, text="スキップ(AIなし)", command=on_skip, width=12)
+    btn_skip.pack(side="right", padx=10)
+
+    root.mainloop()
+    return config
 
 def draw_japanese_text(img, text, position, font_size=18, color=(255, 255, 255)):
     img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
@@ -80,10 +128,14 @@ def save_log(mode, text, score, advice, dominant_emo, total_scores):
         ])
 
 def main():
-    print("ダッシュボードを起動中...")
+    config = show_config_dialog()
+    api_key = config["api_key"]
+    model_name = config["model_name"]
+
+    print(f"ダッシュボードを起動中... (モデル: {model_name} / API使用: {bool(api_key)})")
     init_log_file()
     
-    text_analyzer = TextAnalyzer(api_key=API_KEY, mode="presentation")
+    text_analyzer = TextAnalyzer(api_key=api_key, model_name=model_name, mode="presentation")
     audio_recognizer = AudioRecognizer(mic_id=MIC_ID)
     audio_recognizer.start_speech_to_text(text_analyzer.analyze_async)
     
@@ -107,7 +159,6 @@ def main():
         panel_w = 400
         bottom_h = 100
         
-        #キャンバス生成
         canvas = cv2.copyMakeBorder(frame, 0, bottom_h, 0, panel_w, cv2.BORDER_CONSTANT, value=COLORS["BgMain"])
         
         current_face_scores = None
@@ -168,16 +219,14 @@ def main():
             )
             text_analyzer.has_new_log = False
 
-        #UI右側
+        #UI
         px = w + 15
         py = 15
 
-        #ヘッダー＆モード
         draw_card(canvas, (px, py), (px + 370, py + 55), COLORS["BgCard"], COLORS["Accent"])
         canvas = draw_japanese_text(canvas, f"TARGET: {MODE_NAMES.get(text_analyzer.current_mode, '')}", (px + 12, py + 8), font_size=16, color=COLORS["Accent"])
         canvas = draw_japanese_text(canvas, "[1]プレゼン  [2]面接  [3]雑談", (px + 12, py + 32), font_size=12, color=(160, 170, 180))
 
-        #総合感情
         g_py = py + 68
         draw_card(canvas, (px, g_py), (px + 370, g_py + 85), COLORS["BgCard"])
         canvas = draw_japanese_text(canvas, "TOTAL EMOTION", (px + 15, g_py + 10), font_size=12, color=(140, 150, 160))
@@ -203,7 +252,7 @@ def main():
             gx = px + 75
             gw = 210
             cv2.rectangle(canvas, (gx, y + 2), (gx + gw, y + 18), (50, 55, 65), -1)
-        
+            
             f_w = int(gw * face_scores[emo])
             if f_w > 0: cv2.rectangle(canvas, (gx, y + 3), (gx + f_w, y + 6), color, -1)
 
@@ -215,14 +264,13 @@ def main():
 
             canvas = draw_japanese_text(canvas, f"{int(total_scores[emo]*100)}%", (gx + gw + 8, y + 1), font_size=12, color=(200, 210, 220))
 
-        #UI
         draw_card(canvas, (10, h + 10), (w + panel_w - 10, h + bottom_h - 10), COLORS["BgCard"])
 
         display_txt = current_text if len(current_text) < 32 else current_text[:30] + "..."
         canvas = draw_japanese_text(canvas, f"発話内容: {display_txt}", (25, h + 20), font_size=15, color=(255, 255, 255))
         
         score_color = (0, 230, 120) if text_analyzer.score >= 70 else (0, 180, 255)
-        canvas = draw_japanese_text(canvas, f"コミュニケーションスコア: {text_analyzer.score}点", (w + 15, h + 20), font_size=16, color=score_color)
+        canvas = draw_japanese_text(canvas, f"スコア: {text_analyzer.score}点", (w + 15, h + 20), font_size=16, color=score_color)
 
         canvas = draw_japanese_text(canvas, f"AI Feedback: {text_analyzer.advice}", (25, h + 52), font_size=15, color=COLORS["Accent"])
 
