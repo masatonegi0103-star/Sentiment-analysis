@@ -6,12 +6,12 @@ from janome.tokenizer import Tokenizer
 from google import genai
 
 class TextAnalyzer:
-    def __init__(self, api_key=None, model_name="gemini-2.0-flash", csv_path='JIWC-A_2018.csv', mode="presentation"):
+    def __init__(self, api_key=None, model_name="gemini-2.0-flash", custom_prompt="", csv_path='JIWC-A_2018.csv', mode="presentation"):
         self.t = Tokenizer()
         self.api_key = api_key
         self.model_name = model_name if model_name else "gemini-2.0-flash"
         self.client = None
-
+        
         if self.api_key and self.api_key.strip():
             try:
                 self.client = genai.Client(api_key=self.api_key)
@@ -31,7 +31,8 @@ class TextAnalyzer:
         self.prompts = {
             "presentation": "あなたはプレゼンのプロです。聞き手に対する論理性の高さ、説得力、わかりやすさを重視して評価してください。",
             "interview": "あなたは採用面接官です。面接での適切な敬語、自信、結論ファーストで話せているかを重視して評価してください。",
-            "casual": "あなたは話しやすい友人です。話の面白さ、親しみやすさ、共感度を重視して評価してください。"
+            "casual": "あなたは話しやすい友人です。話の面白さ、親しみやすさ、共感度を重視して評価してください。",
+            "custom": custom_prompt if custom_prompt.strip() else "あなたは優秀なアナリストです。発言の説得力と感情表現を評価してください。"
         }
         
         self.emotion_dict = {}
@@ -40,6 +41,12 @@ class TextAnalyzer:
     def set_mode(self, mode):
         if mode in self.prompts:
             self.current_mode = mode
+
+    def set_custom_prompt(self, prompt_text):
+        """カスタムプロンプトを動的に書き換える"""
+        if prompt_text.strip():
+            self.prompts["custom"] = prompt_text
+            print("カスタムプロンプトを更新しました。")
 
     def load_csv_dictionary(self, csv_path):
         try:
