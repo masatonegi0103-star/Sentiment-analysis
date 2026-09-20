@@ -44,3 +44,7 @@ GPUもそこまで使わない
 GPU使用率がダントツで高い 
 
 mediapipeと同時使用するにはあまり向かない 
+
+## 起動に必要なパッケージ
+
+` pip install opencv-python pillow numpy pandas janome google-genai deepface tf-keras faster-whisper PyAudio SpeechRecognition `
