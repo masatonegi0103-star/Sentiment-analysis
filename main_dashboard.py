@@ -5,11 +5,14 @@ import csv
 import os
 import datetime
 import numpy as np
+
 import tkinter as tk
 from tkinter import simpledialog, messagebox
+
 from collections import deque
 from PIL import Image, ImageDraw, ImageFont
 from deepface import DeepFace
+
 from text_analyzer import TextAnalyzer
 from audio_recognizer import AudioRecognizer
 
@@ -33,42 +36,54 @@ EMOTION_JP = {
 }
 
 MODE_NAMES = {
-    "presentation": "プレゼン（聴衆）", "interview": "面接（採用担当）", "casual": "雑談（友人）"
+    "presentation": "プレゼン（聴衆）", 
+    "interview": "面接（採用担当）", 
+    "casual": "雑談（友人）",
+    "custom": "カスタム（自作プロンプト）"
 }
 
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def show_config_dialog():
-    config = {"api_key": None, "model_name": "gemini-2.0-flash"}
+    config = {
+        "api_key": None, 
+        "model_name": "gemini-2.0-flash", 
+        "custom_prompt": ""
+    }
 
     root = tk.Tk()
     root.title("AI Dashboard Settings")
-    root.geometry("400x230")
+    root.geometry("450x360")
     root.resizable(False, False)
-
     root.eval('tk::PlaceWindow . center')
 
-    tk.Label(root, text="AI Settings", font=("Helvetica", 14, "bold")).pack(pady=10)
+    tk.Label(root, text="AI Dashboard Configuration", font=("Helvetica", 14, "bold")).pack(pady=10)
 
-    #モデル名
     frame_model = tk.Frame(root)
-    frame_model.pack(fill="x", px=20, py=5)
-    tk.Label(frame_model, text="Model Name:", width=12, anchor="w").pack(side="left")
+    frame_model.pack(fill="x", padx=20, pady=4)
+    tk.Label(frame_model, text="Model Name:", width=14, anchor="w").pack(side="left")
     entry_model = tk.Entry(frame_model)
     entry_model.insert(0, "gemini-2.0-flash")
     entry_model.pack(side="right", expand=True, fill="x")
 
-    #APIキー
     frame_key = tk.Frame(root)
-    frame_key.pack(fill="x", px=20, py=5)
-    tk.Label(frame_key, text="API Key:", width=12, anchor="w").pack(side="left")
+    frame_key.pack(fill="x", padx=20, pady=4)
+    tk.Label(frame_key, text="API Key:", width=14, anchor="w").pack(side="left")
     entry_key = tk.Entry(frame_key, show="*")
     entry_key.pack(side="right", expand=True, fill="x")
+
+    frame_prompt = tk.Frame(root)
+    frame_prompt.pack(fill="x", padx=20, pady=6)
+    tk.Label(frame_prompt, text="Custom Prompt (Optional):", anchor="w").pack(anchor="w")
+    txt_prompt = tk.Text(frame_prompt, height=4, font=("Consolas", 9))
+    txt_prompt.insert("1.0", "あなたは英語コーチです。英語表現の自然さと発声の自信を100点満点で評価し、アドバイスしてください。")
+    txt_prompt.pack(fill="x", pady=2)
 
     def on_submit():
         config["model_name"] = entry_model.get().strip()
         config["api_key"] = entry_key.get().strip()
+        config["custom_prompt"] = txt_prompt.get("1.0", tk.END).strip()
         root.destroy()
 
     def on_skip():
@@ -76,12 +91,12 @@ def show_config_dialog():
         root.destroy()
 
     btn_frame = tk.Frame(root)
-    btn_frame.pack(pady=15)
+    btn_frame.pack(pady=10)
 
-    btn_ok = tk.Button(btn_frame, text="設定して起動", command=on_submit, width=12, bg="#4CAF50", fg="white")
+    btn_ok = tk.Button(btn_frame, text="設定して起動", command=on_submit, width=14, bg="#4CAF50", fg="white")
     btn_ok.pack(side="left", padx=10)
 
-    btn_skip = tk.Button(btn_frame, text="スキップ(AIなし)", command=on_skip, width=12)
+    btn_skip = tk.Button(btn_frame, text="スキップ(AIなし)", command=on_skip, width=14)
     btn_skip.pack(side="right", padx=10)
 
     root.mainloop()
@@ -131,11 +146,20 @@ def main():
     config = show_config_dialog()
     api_key = config["api_key"]
     model_name = config["model_name"]
+    custom_prompt = config["custom_prompt"]
 
     print(f"ダッシュボードを起動中... (モデル: {model_name} / API使用: {bool(api_key)})")
     init_log_file()
+
+    initial_mode = "custom" if custom_prompt else "presentation"
     
-    text_analyzer = TextAnalyzer(api_key=api_key, model_name=model_name, mode="presentation")
+    text_analyzer = TextAnalyzer(
+        api_key=api_key, 
+        model_name=model_name, 
+        custom_prompt=custom_prompt,
+        mode=initial_mode
+    )
+    
     audio_recognizer = AudioRecognizer(mic_id=MIC_ID)
     audio_recognizer.start_speech_to_text(text_analyzer.analyze_async)
     
@@ -195,7 +219,6 @@ def main():
         vol_score = audio_recognizer.volume_score
         current_text = text_analyzer.last_text
 
-        #総合スコア計算
         total_scores = {}
         dominant_emo = "Neutral"
         max_s = -1
@@ -219,13 +242,12 @@ def main():
             )
             text_analyzer.has_new_log = False
 
-        #UI
         px = w + 15
         py = 15
 
         draw_card(canvas, (px, py), (px + 370, py + 55), COLORS["BgCard"], COLORS["Accent"])
-        canvas = draw_japanese_text(canvas, f"TARGET: {MODE_NAMES.get(text_analyzer.current_mode, '')}", (px + 12, py + 8), font_size=16, color=COLORS["Accent"])
-        canvas = draw_japanese_text(canvas, "[1]プレゼン  [2]面接  [3]雑談", (px + 12, py + 32), font_size=12, color=(160, 170, 180))
+        canvas = draw_japanese_text(canvas, f"TARGET: {MODE_NAMES.get(text_analyzer.current_mode, '')}", (px + 12, py + 8), font_size=15, color=COLORS["Accent"])
+        canvas = draw_japanese_text(canvas, "[1]プレゼン [2]面接 [3]雑談 [4]カスタム", (px + 12, py + 32), font_size=11, color=(160, 170, 180))
 
         g_py = py + 68
         draw_card(canvas, (px, g_py), (px + 370, g_py + 85), COLORS["BgCard"])
@@ -288,6 +310,8 @@ def main():
             text_analyzer.set_mode("interview")
         elif key == ord('3'):
             text_analyzer.set_mode("casual")
+        elif key == ord('4'):
+            text_analyzer.set_mode("custom")
 
     cap.release()
     audio_recognizer.stop()
